@@ -1,3 +1,8 @@
+"""
+example script usage:
+python3 wizlight_follower.py 192.168.1.2,wemo:192.168.1.13 192.168.1.32,192.168.1.33 -s 0.1
+"""
+
 import sys
 import json
 import socket
@@ -34,7 +39,7 @@ class WeMoInsightAdapter:
         return self.insight.toggle()
 
 
-async def main(follow_ips, switch_ips, homeid=None, sleepsecs=1):
+async def main(follow_ips, switch_ips, homeid=None, sleep_secs=1, cycle_threshold=1):
     follow_lights = []
     for ip in follow_ips:
         if ip.startswith('wemo:'):
@@ -62,22 +67,22 @@ async def main(follow_ips, switch_ips, homeid=None, sleepsecs=1):
         follow_lights.append(light)
 
     switch_sockets = []
-    switch_powered = []
+    switch_cycles = []
     for ip in switch_ips:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect((ip, WIZ__CONTROL_PORT))
         s.settimeout(0)
         switch_sockets.append(s)
-        switch_powered.append(None)
+        switch_cycles.append(0)
 
     config_message = r'{"method":"getSystemConfig","params":{}}'.encode('utf-8')
     for s in switch_sockets:
         s.send(config_message)
-    sleep(sleepsecs)
+    sleep(sleep_secs)
 
     while True:
         try:
-            toggle = None
+            turn_lights_on = None
             for i, s in enumerate(switch_sockets):
                 try:
                     response = s.recv(1024)  # raises BlockingIOError if no response
@@ -86,35 +91,43 @@ async def main(follow_ips, switch_ips, homeid=None, sleepsecs=1):
                     config = json.loads(response)
 
                     if homeid is None or config['result']['homeId'] == homeid:
-                        if not switch_powered[i] and switch_powered[i]  is not None:
-                            log.info(f'light at {s.getpeername()[0]} now on, so followers on')
-                            toggle = True
-                        switch_powered[i] = True
+
+                        switch_cycles[i] += 1
                     elif homeid is not None:
                         log.error(f'Light at {s.getpeername()[0]} is on but not the right homeid')
                         return 3
 
                 except BlockingIOError:
                     log.info(f'no response from light at {s.getpeername()[0]}')
-                    if switch_powered[i]:
-                        log.info(f'light at {s.getpeername()[0]} now off, so followers off')
-                        toggle = False
-                    switch_powered[i] = False
+                    switch_cycles[i] -= 1
 
                 except ConnectionRefusedError:
                     log.warning(f'connection refused to light at {s.getpeername()[0]} ignorable unless repeated')
                     continue
-
                 s.send(config_message)
-            if toggle is not None:
-                if toggle:
-                    # turn followers on
-                    await asyncio.gather(*[light.turn_on() for light in follow_lights])
-                else:
+
+            # check if something has crossed a threshold
+            if sum(switch_cycles) <= 0:
+                # might need a switch off - check if they're all 0 or less and at least one is 0
+                if all([c<=0 for c in switch_cycles]) and any([c==0 for c in switch_cycles]):
+                    log.info(f'switch lights status is {switch_cycles}, so followers off')
                     # turn followers off
                     await asyncio.gather(*[light.turn_off() for light in follow_lights])
+            elif sum(switch_cycles) >= cycle_threshold*len(switch_cycles):
+                # might need a switch on
+                if all([c>=cycle_threshold for c in switch_cycles]) and any([c==cycle_threshold for c in switch_cycles]):
+                    log.info(f'switch lights status is {switch_cycles}, so followers on')
+                    # turn followers on
+                    await asyncio.gather(*[light.turn_on() for light in follow_lights])
 
-            sleep(sleepsecs)
+            # reset any out-of-range cycle counts
+            for i in range(len(switch_cycles)):
+                if switch_cycles[i] < 0:
+                    switch_cycles[i] = 0
+                if switch_cycles[i] > cycle_threshold:
+                    switch_cycles[i] = cycle_threshold
+
+            sleep(sleep_secs)
         except KeyboardInterrupt:
             return 0
 
@@ -127,6 +140,7 @@ if __name__ == '__main__':
     parser.add_argument('switch_ips')
     parser.add_argument('-s', '--sleepsecs', default=1, type=float)
     parser.add_argument('-i', '--homeid', default=1501360, type=int)
+    parser.add_argument('-c', '--cyclethreshold', default=1, type=int)
     parser.add_argument('-q', '--quiet')
 
     args = parser.parse_args()
@@ -137,5 +151,5 @@ if __name__ == '__main__':
         log.setLevel(logging.INFO)
 
     retcode = asyncio.run(main(args.follow_ips.split(','), args.switch_ips.split(','),
-                           args.homeid, args.sleepsecs))
+                           args.homeid, args.sleepsecs, args.cyclethreshold))
     sys.exit(retcode)
