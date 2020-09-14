@@ -67,8 +67,9 @@ async def main(follow_ips, switch_ips, homeid=None, sleep_secs=1, cycle_threshol
 
         follow_lights.append(light)
 
-    switch_sockets = []
-    switch_cycles = []
+    switch_sockets = []  # network sockets for each switch
+    switch_cycles = []  # each switch's ncycles on
+    last_switch_on = None  # the last switch that happened - True for on, False for off, None for neither yet
     for ip in switch_ips:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect((ip, WIZ__CONTROL_PORT))
@@ -103,7 +104,7 @@ async def main(follow_ips, switch_ips, homeid=None, sleep_secs=1, cycle_threshol
                     switch_cycles[i] -= 1
 
                 except ConnectionRefusedError:
-                    log.warning(f'connection refused to light at {s.getpeername()[0]} ignorable unless repeated')
+                    log.warning(f'connection refused qto light at {s.getpeername()[0]} ignorable unless repeated')
                     continue
                 s.send(config_message)
 
@@ -111,15 +112,28 @@ async def main(follow_ips, switch_ips, homeid=None, sleep_secs=1, cycle_threshol
             if sum(switch_cycles) <= 0:
                 # might need a switch off - check if they're all 0 or less and at least one is 0
                 if all([c<=0 for c in switch_cycles]) and any([c==0 for c in switch_cycles]):
-                    log.info(f'switch lights status is {switch_cycles}, so followers off')
-                    # turn followers off
-                    await asyncio.gather(*[light.turn_off() for light in follow_lights])
+                    if last_switch_on is False:
+                        log.info(f'switch lights status is {switch_cycles}, '
+                                  'but last switch was off so doing nothing')
+                    else:
+                        log.info(f'switch lights status is {switch_cycles}, '
+                                  'so followers off')
+                        # turn followers off
+                        await asyncio.gather(*[light.turn_off() for light in follow_lights])
+                        last_switch_on = False
+
             elif sum(switch_cycles) >= cycle_threshold*len(switch_cycles):
                 # might need a switch on
                 if all([c>=cycle_threshold for c in switch_cycles]) and any([c==cycle_threshold for c in switch_cycles]):
-                    log.info(f'switch lights status is {switch_cycles}, so followers on')
-                    # turn followers on
-                    await asyncio.gather(*[light.turn_on() for light in follow_lights])
+                    if last_switch_on is True:
+                        log.info(f'switch lights status is {switch_cycles}, '
+                                  'but last switch was on so doing nothing')
+                    else:
+                        log.info(f'switch lights status is {switch_cycles}, '
+                                  'so followers on')
+                        # turn followers on
+                        await asyncio.gather(*[light.turn_on() for light in follow_lights])
+                        last_switch_on = True
 
             # reset any out-of-range cycle counts
             for i in range(len(switch_cycles)):
