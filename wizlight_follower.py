@@ -1,6 +1,7 @@
+#!/usr/bin/env python3
 """
 example script usage:
-python3 wizlight_follower.py 192.168.1.2,wemo:192.168.1.13 192.168.1.32,192.168.1.33 -s 0.1
+python3 wizlight_follower.py 192.168.1.2,wemo:192.168.1.13 192.168.1.32,192.168.1.33 -s 0.1 -c 3
 """
 
 import sys
