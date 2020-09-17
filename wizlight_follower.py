@@ -156,7 +156,7 @@ if __name__ == '__main__':
     parser.add_argument('-s', '--sleepsecs', default=1, type=float)
     parser.add_argument('-i', '--homeid', default=1501360, type=int)
     parser.add_argument('-c', '--cyclethreshold', default=1, type=int)
-    parser.add_argument('-q', '--quiet')
+    parser.add_argument('-q', '--quiet', action='store_true')
 
     args = parser.parse_args()
 
