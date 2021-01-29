@@ -56,7 +56,7 @@ async def main(follow_ips, switch_ips, homeid=None, sleep_secs=1, cycle_threshol
             #assume wizlight
             light = Wizlight(ip)
             config = await light.getBulbConfig()
-            if 'result' in config:
+            if config is not None and 'result' in config:
                 if homeid is not None and config['result']['homeId'] != homeid:
                     log.error(f"lighbulb at {light.ip} is in homeid "
                             f"{config['result']['homeId']} instead of {homeid}")
@@ -106,7 +106,14 @@ async def main(follow_ips, switch_ips, homeid=None, sleep_secs=1, cycle_threshol
                 except ConnectionRefusedError:
                     log.warning(f'connection refused qto light at {s.getpeername()[0]} ignorable unless repeated')
                     continue
-                s.send(config_message)
+                try:
+                    s.send(config_message)
+                except OSError as e:
+                    if 'unreachable' in str(e):
+                        print("got OSError. skippable?'", e.args)
+                    else:
+                        raise
+                    
 
             # check if something has crossed a threshold
             if sum(switch_cycles) <= 0:
